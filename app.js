@@ -2,17 +2,27 @@ const express = require('express');
 const path = require('path');
 const ejs = require('ejs');
 const ejsMate = require('ejs-mate');
-const Joi = require('joi');
-const { campgroundSchema } = require('./schemas.js');
+const session = require('express-session');
+const flash = require('connect-flash');
+const passport = require('passport');
+const LocalStrategy = require('passport-local');
+const User = require('./models/user');
 const mongoose = require('mongoose');
 const catchAsync = require('./Utils/catchAsync');
 const ExpressError = require('./Utils/ExpressError');
 const methodOverride = require('method-override');
-const Campground = require('./models/campground');
+const productRoutes = require('./routes/products.js');
+const userRoutes = require('./routes/users');
+const orderRoutes =require('./routes/orderRouter.js')
+const bodyParser = require('body-parser');
+const helmet = require('helmet');
+
+const mongoSanitize = require('express-mongo-sanitize');
 
 mongoose.connect('mongodb+srv://shubham:spopliii_67@cluster0.kej5hm5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
+//   useFindAndModify:false,
 });
 
 const db = mongoose.connection;
@@ -27,56 +37,81 @@ app.engine('ejs', ejsMate)
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+
 app.use(express.urlencoded({ extended: true }));
 app.use(methodOverride('_method'));
+app.use(express.static(path.join(__dirname, 'public')));
+// Sanitize user input to prevent MongoDB Operator Injection
 
-const validateCampground = (req, res, next) => {
-    const { error } = campgroundSchema.validate(req.body);
-    if (error) {
-        const msg = error.details.map(el => el.message).join(',')
-        throw new ExpressError(msg, 400)
-    } else {
-        next();
+// By default, $ and . characters are removed completely from user-supplied input in the following places:
+// - req.body
+// - req.params
+// - req.headers
+// - req.query
+
+// To remove data using these defaults:
+app.use(mongoSanitize());
+
+// const productSchema = (req, res, next) => {
+//     const { error } = productSchema.validate(req.body);
+//     if (error) {
+//         const msg = error.details.map(el => el.message).join(',')
+//         throw new ExpressError(msg, 400)
+//     } else {
+//         next();
+//     }
+// }
+
+const sessionConfig = {
+    secret: 'thisshouldbeabettersecret!',
+    resave: false,
+    saveUninitialized: true,
+    cookie: {
+        httpOnly: true,
+        expires: Date.now() + 1000 * 60 * 60 * 24 * 7,
+        maxAge: 1000 * 60 * 60 * 24 * 7
     }
 }
+app.use(session(sessionConfig))
+app.use(flash());
 
-app.get('/', (req, res) => {
-    res.render('home')
-});
-app.get('/campgrounds',catchAsync( async (req, res) => {
-    const campgrounds = await Campground.find({});
-    res.render('campgrounds/index', { campgrounds })
-}));
-app.get('/campgrounds/new', (req, res) => {
-    res.render('campgrounds/new');
+// app.use(helmet({
+//     contentSecurityPolicy: false,
+// }));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+passport.use(new LocalStrategy(User.authenticate()));
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+
+app.use((req, res, next) => {
+    console.log(req.query);
+    // console.log(req.session)
+    res.locals.currentUser = req.user;
+    res.locals.success = req.flash('success');
+    res.locals.error = req.flash('error');
+    next();
+
 })
-app.post('/campgrounds', validateCampground,catchAsync(async (req, res, next) => {
-    // if (!req.body.campground) throw new ExpressError('Invalid Campground Data', 400);
-    await campground.save();
-    res.redirect(`/campgrounds/${campground._id}`);
-  }));
 
-app.get('/campgrounds/:id', async (req, res,) => {
-    const campground = await Campground.findById(req.params.id)
-    res.render('campgrounds/show', { campground });
-});
 
-app.get('/campgrounds/:id/edit',catchAsync( async (req, res) => {
-    const campground = await Campground.findById(req.params.id)
-    res.render('campgrounds/edit', { campground });
-}))
 
-app.put('/campgrounds/:id',validateCampground,catchAsync( async (req, res) => {
-    const { id } = req.params;
-    const campground = await Campground.findByIdAndUpdate(id, { ...req.body.campground });
-    res.redirect(`/campgrounds/${campground._id}`)
-}));
+app.use("/products",productRoutes)
+app.use('/', userRoutes);
+app.use('/orders', orderRoutes);
 
-app.delete('/campgrounds/:id', async (req, res) => {
-    const { id } = req.params;
-    await Campground.findByIdAndDelete(id);
-    res.redirect('/campgrounds');
-})
+
+// app.use(mongoSanitize)
+// app.get('/', (req, res) => {
+//     res.render('home')
+// });
 
 app.use((err, req, res, next) => {
     const { statusCode = 500 } = err;

@@ -1,3 +1,5 @@
+
+
 const Joi = require('joi');
 
 module.exports.campgroundSchema = Joi.object({
@@ -9,4 +11,3 @@ module.exports.campgroundSchema = Joi.object({
         description: Joi.string().required()
     }).required()
 });
-
